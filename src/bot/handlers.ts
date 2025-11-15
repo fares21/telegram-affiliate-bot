@@ -185,11 +185,13 @@ Admin only:
 
       // حذف رسالة المعالجة وإرسال النتيجة
       await ctx.telegram.deleteMessage(chatId, processingMsg.message_id);
-      await ctx.reply(message, { 
-        parse_mode: 'Markdown',
-        disable_web_page_preview: false,
-        ...buttons
-      });
+     await ctx.reply(message, { 
+  parse_mode: 'Markdown',
+  link_preview_options: {  // ← غيّر من disable_web_page_preview
+    is_disabled: false
+  },
+  ...buttons
+});
 
       // البحث عن تنبيهات مطابقة
       if (product) {
