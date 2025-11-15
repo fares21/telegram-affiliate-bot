@@ -9,23 +9,49 @@ import { Broadcaster } from '../broadcast/broadcaster';
 import { t } from '../config/i18n';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
-import { isValidUrl } from '../utils/helpers';
+
+// أدوات أمان للتنسيق
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+function stripHtml(s: string) {
+  return s.replace(/<[^>]*>/g, '');
+}
+function truncate(s: string, max = 180) {
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+// غلاف إرسال آمن مع fallback
+async function safeReply(ctx: any, html: string, extra: any = {}) {
+  try {
+    return await ctx.reply(html, { parse_mode: 'HTML', ...extra });
+  } catch (e) {
+    logger.error('Reply HTML failed, sending plain text', { e });
+    return await ctx.reply(stripHtml(html), extra);
+  }
+}
+async function safeSendMessage(bot: Telegraf, chatId: number, html: string, extra: any = {}) {
+  try {
+    return await bot.telegram.sendMessage(chatId, html, { parse_mode: 'HTML', ...extra });
+  } catch (e) {
+    logger.error('sendMessage HTML failed, sending plain text', { e });
+    return await bot.telegram.sendMessage(chatId, stripHtml(html), extra);
+  }
+}
 
 export function registerHandlers(bot: Telegraf<BotContext>): void {
-  
-  // معالج أمر /start
+  // /start
   bot.start(async (ctx) => {
     try {
       const chatId = ctx.chat.id;
       const username = ctx.from.username;
-
-      // إنشاء أو تحديث المستخدم
       await createOrUpdateUser(chatId, username);
-
       const language = ctx.session?.language || 'ar';
-      const welcomeMessage = t('welcome', language);
-
-      await ctx.reply(welcomeMessage, {
+      const welcome = escapeHtml(t('welcome', language));
+      await safeReply(ctx, welcome, {
         reply_markup: {
           keyboard: [
             [{ text: t('addToCart', language) }, { text: t('viewCart', language) }],
@@ -34,18 +60,16 @@ export function registerHandlers(bot: Telegraf<BotContext>): void {
           resize_keyboard: true
         }
       });
-
       logger.info('User started bot', { chatId, username });
-
     } catch (error) {
       logger.error('Error in start command', { error });
-      ctx.reply('❌ حدث خطأ. يرجى المحاولة لاحقاً.');
+      await ctx.reply('❌ حدث خطأ. يرجى المحاولة لاحقاً.');
     }
   });
 
-  // معالج أمر /language
+  // /language
   bot.command('language', async (ctx) => {
-    await ctx.reply('اختر اللغة / Choose Language:', {
+    await safeReply(ctx, escapeHtml('اختر اللغة / Choose Language:'), {
       reply_markup: {
         inline_keyboard: [
           [
@@ -57,120 +81,109 @@ export function registerHandlers(bot: Telegraf<BotContext>): void {
     });
   });
 
-  // معالج تغيير اللغة
+  // تغيير اللغة
   bot.action(/lang_(.+)/, async (ctx) => {
     try {
       const language = ctx.match[1];
       ctx.session = ctx.session || {};
       ctx.session.language = language;
-
       await updateUserLanguage(ctx.chat!.id, language);
       await ctx.answerCbQuery();
-      await ctx.reply(t('welcome', language));
-
+      await safeReply(ctx, escapeHtml(t('welcome', language)));
       logger.info('Language changed', { chatId: ctx.chat!.id, language });
-
     } catch (error) {
       logger.error('Error changing language', { error });
-      ctx.answerCbQuery('❌ Error');
+      await ctx.answerCbQuery('❌ Error');
     }
   });
 
-  // معالج أمر /help
+  // /help (HTML بدل Markdown)
   bot.command('help', async (ctx) => {
     const lang = ctx.session?.language || 'ar';
-    
-    const helpMessage = lang === 'ar' ? `
-📚 **دليل الاستخدام**
+    const helpHtml = lang === 'ar' ? `
+📚 <b>دليل الاستخدام</b>
 
-**الأوامر المتاحة:**
-
-🔗 **إضافة منتج:**
+🔗 <b>إضافة منتج:</b>
 أرسل رابط منتج من AliExpress للحصول على:
 • رابط أفلييت مخصص
 • السعر الأصلي والحالي
 • الكوبونات المتاحة
 • السعر النهائي بعد الخصومات
 
-🛒 **السلة:**
+🛒 <b>السلة:</b>
 /cart - عرض سلة التسوق
 /add_to_cart [رابط] - إضافة منتج للسلة
 سيتم مراقبة الأسعار تلقائياً وإرسال تنبيهات عند التغيير
 
-🔔 **التنبيهات:**
+🔔 <b>التنبيهات:</b>
 /alert [كلمة] - تفعيل تنبيه للكلمة المفتاحية
 /my_alerts - عرض تنبيهاتك النشطة
-ستصلك تنبيهات فورية عند ظهور عروض مطابقة
 
-⚙️ **إعدادات:**
+⚙️ <b>الإعدادات:</b>
 /language - تغيير اللغة
 /stats - إحصائياتك
 
-للمشرفين فقط:
-/broadcast [رسالة] - إرسال بث لجميع المستخدمين
+<b>للمشرفين فقط:</b>
+/broadcast [رسالة] - إرسال بث
 /admin - لوحة الإدارة
 ` : `
-📚 **User Guide**
+📚 <b>User Guide</b>
 
-**Available Commands:**
-
-🔗 **Add Product:**
+🔗 <b>Add Product:</b>
 Send an AliExpress product link to get:
 • Custom affiliate link
-• Original and current price
+• Original/current price
 • Available coupons
 • Final price after discounts
 
-🛒 **Cart:**
-/cart - View shopping cart
-/add_to_cart [link] - Add product to cart
-Prices are monitored automatically with alerts
+🛒 <b>Cart:</b>
+/cart - View cart
+/add_to_cart [link] - Add product
 
-🔔 **Alerts:**
-/alert [keyword] - Set keyword alert
-/my_alerts - View your active alerts
-Get instant notifications for matching deals
+🔔 <b>Alerts:</b>
+/alert [keyword] - Set alert
+/my_alerts - View alerts
 
-⚙️ **Settings:**
+⚙️ <b>Settings:</b>
 /language - Change language
-/stats - Your statistics
+/stats - Your stats
 
-Admin only:
-/broadcast [message] - Send broadcast
-/admin - Admin panel
+<b>Admin only:</b>
+/broadcast [message]
+/admin
 `;
-
-    await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
+    await safeReply(ctx, helpHtml);
   });
 
-  // معالج الروابط (تحويل لأفلييت)
-  bot.hears(/https?:\/\/(www\.)?(aliexpress|ae\.aliexpress)\.com\/.+/, async (ctx) => {
+  // معالجة روابط AliExpress
+  bot.hears(/https?://(www.)?(aliexpress|ae.aliexpress).com/.+/, async (ctx) => {
     try {
       const url = ctx.message.text;
       const chatId = ctx.chat.id;
       const lang = ctx.session?.language || 'ar';
 
-      // رسالة معالجة
       const processingMsg = await ctx.reply(t('processing', lang));
 
-      // جلب المستخدم
       const user = await createOrUpdateUser(chatId, ctx.from.username);
 
-      // توليد رابط الأفلييت
       const affiliateData = await affiliateService.convertToAffiliateLink(url, user.id);
-
-      // حساب السعر النهائي
       const pricing = await pricingService.calculateFinalPrice(url);
-
-      // جلب تفاصيل المنتج
       const product = await affiliateService.getProductDetails(url);
 
-      // تنسيق الرسالة
-      let message = `📦 **${product?.product_title || 'منتج'}**\n\n`;
-      message += pricingService.formatPricingInfo(pricing, lang);
-      message += `\n\n🔗 **${t('affiliateLink', lang)}:**\n${affiliateData.affiliateUrl}`;
+      const rawTitle = product?.product_title || 'منتج';
+      const title = escapeHtml(truncate(rawTitle));
+      const affUrl = escapeHtml(affiliateData.affiliateUrl);
 
-      // الأزرار
+      // تأكد أن formatPricingInfo تُنتج HTML
+      const pricingHtml = pricingService.formatPricingInfo(pricing, lang);
+
+      const messageHtml = `📦 <b>${title}</b>
+
+${pricingHtml}
+
+🔗 <b>${escapeHtml(t('affiliateLink', lang))}:</b>
+${affUrl}`;
+
       const buttons = Markup.inlineKeyboard([
         [
           Markup.button.url(lang === 'ar' ? '🛍 زيارة المنتج' : '🛍 Visit Product', affiliateData.affiliateUrl)
@@ -183,17 +196,13 @@ Admin only:
         ]
       ]);
 
-      // حذف رسالة المعالجة وإرسال النتيجة
-      await ctx.telegram.deleteMessage(chatId, processingMsg.message_id);
-     await ctx.reply(message, { 
-  parse_mode: 'Markdown',
-  link_preview_options: {  // ← غيّر من disable_web_page_preview
-    is_disabled: false
-  },
-  ...buttons
-});
+      await ctx.telegram.deleteMessage(chatId, (processingMsg as any).message_id);
+      await safeReply(ctx, messageHtml, {
+        link_preview_options: { is_disabled: false },
+        ...buttons
+      });
 
-      // البحث عن تنبيهات مطابقة
+      // تنبيهات مطابقة
       if (product) {
         const matches = await alertsService.findAlertMatches(
           product.product_title,
@@ -201,27 +210,26 @@ Admin only:
           pricing.finalPrice,
           pricing.savingsPercentage
         );
-
-        // إرسال التنبيهات
         for (const match of matches) {
-          if (match.chatId !== chatId) { // لا نرسل للمستخدم الحالي
-            const alertMessage = alertsService.formatAlertMessage(match, lang);
-            await bot.telegram.sendMessage(match.chatId, alertMessage + `\n\n${affiliateData.affiliateUrl}`, {
-              parse_mode: 'Markdown'
+          if (match.chatId !== chatId) {
+            const alertHtml = alertsService.formatAlertMessage(match, lang); // اجعلها تُنتج HTML
+            await safeSendMessage(bot, match.chatId, `${alertHtml}
+
+${affUrl}`, {
+              link_preview_options: { is_disabled: false }
             });
           }
         }
       }
 
       logger.info('Product link processed', { chatId, url });
-
     } catch (error) {
       logger.error('Error processing product link', { error });
-      ctx.reply('❌ لم أتمكن من معالجة هذا الرابط. تأكد أنه رابط صحيح من AliExpress.');
+      await ctx.reply('❌ لم أتمكن من معالجة هذا الرابط. تأكد أنه رابط صحيح من AliExpress.');
     }
   });
 
-  // معالج أمر /cart
+  // /cart
   bot.command('cart', async (ctx) => {
     try {
       const chatId = ctx.chat.id;
@@ -229,60 +237,57 @@ Admin only:
       const lang = ctx.session?.language || 'ar';
 
       const cartItems = await cartService.getUserCart(user.id);
-      const message = cartService.formatCartMessage(cartItems, lang);
+      // عدّل cartService لتُرجع HTML
+      const msgHtml = cartService.formatCartMessage(cartItems, lang);
 
       if (cartItems.length > 0) {
         const buttons = Markup.inlineKeyboard(
           cartItems.slice(0, 10).map((item, index) => [
             Markup.button.callback(
-              `${index + 1}. ${item.title.substring(0, 30)}...`,
+              `${index + 1}. ${truncate(item.title, 30)}`,
               `view_cart_${item.id}`
             )
           ])
         );
-
-        await ctx.reply(message, { parse_mode: 'Markdown', ...buttons });
+        await safeReply(ctx, msgHtml, { ...buttons });
       } else {
-        await ctx.reply(message);
+        await safeReply(ctx, msgHtml);
       }
-
     } catch (error) {
       logger.error('Error fetching cart', { error });
-      ctx.reply('❌ حدث خطأ في جلب السلة.');
+      await ctx.reply('❌ حدث خطأ في جلب السلة.');
     }
   });
 
-  // معالج إضافة للسلة
+  // إضافة للسلة (زر)
   bot.action(/add_cart_(.+)/, async (ctx) => {
     try {
       const productId = ctx.match[1];
       const chatId = ctx.chat!.id;
-      const user = await createOrUpdateUser(chatId, ctx.from!.username);
+      await createOrUpdateUser(chatId, ctx.from!.username);
       const lang = ctx.session?.language || 'ar';
-
-      // في التطبيق الفعلي، نحتاج لحفظ URL المنتج مؤقتاً
       await ctx.answerCbQuery(lang === 'ar' ? '✅ تمت الإضافة للسلة' : '✅ Added to cart');
-      
       logger.info('Product added to cart', { chatId, productId });
-
     } catch (error) {
       logger.error('Error adding to cart', { error });
-      ctx.answerCbQuery('❌ Error');
+      await ctx.answerCbQuery('❌ Error');
     }
   });
 
-  // معالج أمر /alert
+  // /alert
   bot.command('alert', async (ctx) => {
     try {
       const args = ctx.message.text.split(' ').slice(1);
       const lang = ctx.session?.language || 'ar';
 
       if (args.length === 0) {
-        await ctx.reply(
-          lang === 'ar' 
-            ? '💡 الاستخدام: /alert [كلمة مفتاحية]\n\nمثال: /alert Xiaomi'
-            : '💡 Usage: /alert [keyword]\n\nExample: /alert Xiaomi'
-        );
+        await safeReply(ctx, lang === 'ar'
+          ? '💡 الاستخدام: /alert [كلمة مفتاحية]
+
+مثال: /alert Xiaomi'
+          : '💡 Usage: /alert [keyword]
+
+Example: /alert Xiaomi');
         return;
       }
 
@@ -291,18 +296,15 @@ Admin only:
       const user = await createOrUpdateUser(chatId, ctx.from.username);
 
       await alertsService.createUserAlert(user.id, keyword);
-
-      await ctx.reply(t('alertSet', lang, { keyword }));
-
+      await safeReply(ctx, escapeHtml(t('alertSet', lang, { keyword })));
       logger.info('Alert created', { chatId, keyword });
-
     } catch (error) {
       logger.error('Error creating alert', { error });
-      ctx.reply('❌ حدث خطأ في إنشاء التنبيه.');
+      await ctx.reply('❌ حدث خطأ في إنشاء التنبيه.');
     }
   });
 
-  // معالج أمر /my_alerts
+  // /my_alerts
   bot.command('my_alerts', async (ctx) => {
     try {
       const chatId = ctx.chat.id;
@@ -316,47 +318,44 @@ Admin only:
         return;
       }
 
-      let message = lang === 'ar' 
-        ? `🔔 **تنبيهاتك النشطة** (${alerts.length})\n\n`
-        : `🔔 **Your Active Alerts** (${alerts.length})\n\n`;
+      const header = lang === 'ar'
+        ? `🔔 <b>تنبيهاتك النشطة</b> (${alerts.length})
+
+`
+        : `🔔 <b>Your Active Alerts</b> (${alerts.length})
+
+`;
 
       const buttons = alerts.map((alert, index) => [
         Markup.button.callback(
-          `${index + 1}. ${alert.keyword} ❌`,
+          `${index + 1}. ${truncate(alert.keyword, 40)} ❌`,
           `del_alert_${alert.id}`
         )
       ]);
 
-      await ctx.reply(message, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard(buttons)
-      });
-
+      await safeReply(ctx, header, { ...Markup.inlineKeyboard(buttons) });
     } catch (error) {
       logger.error('Error fetching alerts', { error });
-      ctx.reply('❌ حدث خطأ في جلب التنبيهات.');
+      await ctx.reply('❌ حدث خطأ في جلب التنبيهات.');
     }
   });
 
-  // معالج حذف تنبيه
+  // حذف تنبيه
   bot.action(/del_alert_(.+)/, async (ctx) => {
     try {
       const alertId = parseInt(ctx.match[1]);
       const lang = ctx.session?.language || 'ar';
-
       await alertsService.deactivateAlert(alertId);
       await ctx.answerCbQuery(lang === 'ar' ? '✅ تم إلغاء التنبيه' : '✅ Alert cancelled');
       await ctx.deleteMessage();
-
       logger.info('Alert deactivated', { alertId });
-
     } catch (error) {
       logger.error('Error deleting alert', { error });
-      ctx.answerCbQuery('❌ Error');
+      await ctx.answerCbQuery('❌ Error');
     }
   });
 
-  // معالج أمر /stats
+  // /stats
   bot.command('stats', async (ctx) => {
     try {
       const chatId = ctx.chat.id;
@@ -367,14 +366,14 @@ Admin only:
       const alerts = await alertsService.getUserAlerts(user.id);
 
       const message = lang === 'ar' ? `
-📊 **إحصائياتك**
+📊 <b>إحصائياتك</b>
 
 🛒 منتجات في السلة: ${cartItems.length}
 🔔 تنبيهات نشطة: ${alerts.length}
 👤 معرف المستخدم: ${user.id}
 📅 تاريخ الانضمام: ${new Date(user.created_at).toLocaleDateString('ar')}
 ` : `
-📊 **Your Statistics**
+📊 <b>Your Statistics</b>
 
 🛒 Cart items: ${cartItems.length}
 🔔 Active alerts: ${alerts.length}
@@ -382,42 +381,43 @@ Admin only:
 📅 Join date: ${new Date(user.created_at).toLocaleDateString('en')}
 `;
 
-      await ctx.reply(message, { parse_mode: 'Markdown' });
-
+      await safeReply(ctx, escapeHtml(message).replace(/
+/g, '
+'));
     } catch (error) {
       logger.error('Error fetching stats', { error });
-      ctx.reply('❌ حدث خطأ.');
+      await ctx.reply('❌ حدث خطأ.');
     }
   });
 
-  // معالج أمر /broadcast (للمشرفين فقط)
+  // /broadcast (Admins)
   bot.command('broadcast', async (ctx) => {
     try {
       const userId = ctx.from.id;
       const lang = ctx.session?.language || 'ar';
-
-      // التحقق من صلاحية المشرف
       if (!config.bot.adminIds.includes(userId)) {
         await ctx.reply(t('notAdmin', lang));
         return;
       }
-
       const message = ctx.message.text.split(' ').slice(1).join(' ');
-
       if (!message) {
-        await ctx.reply(
-          lang === 'ar'
-            ? '💡 الاستخدام: /broadcast [الرسالة]\n\nمثال: /broadcast عروض جديدة اليوم!'
-            : '💡 Usage: /broadcast [message]\n\nExample: /broadcast New deals today!'
-        );
+        await safeReply(ctx, lang === 'ar'
+          ? '💡 الاستخدام: /broadcast [الرسالة]
+
+مثال: /broadcast عروض جديدة اليوم!'
+          : '💡 Usage: /broadcast [message]
+
+Example: /broadcast New deals today!');
         return;
       }
+      await safeReply(ctx,
+        lang === 'ar'
+          ? `⚠️ هل أنت متأكد من إرسال هذا البث لجميع المستخدمين؟
 
-      // تأكيد البث
-      await ctx.reply(
-        lang === 'ar' 
-          ? `⚠️ هل أنت متأكد من إرسال هذا البث لجميع المستخدمين؟\n\n"${message}"` 
-          : `⚠️ Are you sure you want to broadcast this message to all users?\n\n"${message}"`,
+"${escapeHtml(truncate(message, 500))}"`
+          : `⚠️ Are you sure you want to broadcast this message to all users?
+
+"${escapeHtml(truncate(message, 500))}"`,
         Markup.inlineKeyboard([
           [
             Markup.button.callback(lang === 'ar' ? '✅ نعم' : '✅ Yes', `confirm_broadcast`),
@@ -425,107 +425,107 @@ Admin only:
           ]
         ])
       );
-
-      // حفظ الرسالة مؤقتاً
       ctx.session = ctx.session || {};
       ctx.session.tempData = { broadcastMessage: message };
-
     } catch (error) {
       logger.error('Error in broadcast command', { error });
-      ctx.reply('❌ حدث خطأ.');
+      await ctx.reply('❌ حدث خطأ.');
     }
   });
 
-  // تأكيد البث
   bot.action('confirm_broadcast', async (ctx) => {
     try {
       const userId = ctx.from.id;
       const lang = ctx.session?.language || 'ar';
-
       if (!config.bot.adminIds.includes(userId)) {
         await ctx.answerCbQuery(t('notAdmin', lang));
         return;
       }
-
       const message = ctx.session?.tempData?.broadcastMessage;
-
       if (!message) {
         await ctx.answerCbQuery('❌ Error: No message found');
         return;
       }
-
       await ctx.answerCbQuery(lang === 'ar' ? '📤 جاري الإرسال...' : '📤 Sending...');
       await ctx.editMessageText(lang === 'ar' ? '⏳ جاري إرسال البث...' : '⏳ Broadcasting...');
-
       const broadcaster = new Broadcaster(bot);
-      const result = await broadcaster.sendBroadcast({ message });
+      const result = await broadcaster.sendBroadcast({ message, parseMode: 'HTML' });
+      const resultMsg =
+        lang === 'ar'
+          ? `📊 <b>نتيجة البث</b>
 
-      const resultMessage = broadcaster.formatBroadcastResult(result, lang);
-      await ctx.editMessageText(resultMessage, { parse_mode: 'Markdown' });
+✅ نجح: ${result.successCount}
+❌ فشل: ${result.failureCount}
+📮 الإجمالي: ${result.totalRecipients}
+⏱ المدة: ${(result.duration / 1000).toFixed(1)}ث`
+          : `📊 <b>Broadcast Results</b>
 
+✅ Success: ${result.successCount}
+❌ Failed: ${result.failureCount}
+📮 Total: ${result.totalRecipients}
+⏱ Duration: ${(result.duration / 1000).toFixed(1)}s`;
+      try {
+        await ctx.editMessageText(resultMsg, { parse_mode: 'HTML' });
+      } catch {
+        await ctx.editMessageText(stripHtml(resultMsg));
+      }
       logger.info('Broadcast completed by admin', { userId, result });
-
     } catch (error) {
       logger.error('Error confirming broadcast', { error });
-      ctx.answerCbQuery('❌ Error');
+      await ctx.answerCbQuery('❌ Error');
     }
   });
 
-  // إلغاء البث
   bot.action('cancel_broadcast', async (ctx) => {
     const lang = ctx.session?.language || 'ar';
     await ctx.answerCbQuery(lang === 'ar' ? '❌ تم الإلغاء' : '❌ Cancelled');
-    await ctx.deleteMessage();
+    try { await ctx.deleteMessage(); } catch {}
   });
 
-  // معالج أمر /admin (لوحة الإدارة)
+  // /admin
   bot.command('admin', async (ctx) => {
     try {
       const userId = ctx.from.id;
       const lang = ctx.session?.language || 'ar';
-
       if (!config.bot.adminIds.includes(userId)) {
         await ctx.reply(t('notAdmin', lang));
         return;
       }
-
       const { db } = await import('../database/connection');
-      
-      // إحصائيات
       const usersCount = await db.query('SELECT COUNT(*) FROM users');
       const activeUsers = await db.query('SELECT COUNT(*) FROM users WHERE is_subscribed = true');
       const cartItems = await db.query('SELECT COUNT(*) FROM cart_items');
       const alerts = await db.query('SELECT COUNT(*) FROM alerts WHERE is_active = true');
 
       const message = lang === 'ar' ? `
-⚙️ **لوحة الإدارة**
+⚙️ <b>لوحة الإدارة</b>
 
 👥 إجمالي المستخدمين: ${usersCount.rows[0].count}
 ✅ مستخدمون نشطون: ${activeUsers.rows[0].count}
 🛒 منتجات في السلال: ${cartItems.rows[0].count}
 🔔 تنبيهات نشطة: ${alerts.rows[0].count}
 
-**الأوامر المتاحة:**
-/broadcast [رسالة] - إرسال بث
-/stats - إحصائيات عامة
+<b>الأوامر المتاحة:</b>
+/broadcast [رسالة]
+/stats
 ` : `
-⚙️ **Admin Panel**
+⚙️ <b>Admin Panel</b>
 
 👥 Total Users: ${usersCount.rows[0].count}
 ✅ Active Users: ${activeUsers.rows[0].count}
 🛒 Cart Items: ${cartItems.rows[0].count}
 🔔 Active Alerts: ${alerts.rows[0].count}
 
-**Available Commands:**
-/broadcast [message] - Send broadcast
-/stats - General statistics
+<b>Commands:</b>
+/broadcast [message]
+/stats
 `;
-
-      await ctx.reply(message, { parse_mode: 'Markdown' });
-
+      await safeReply(ctx, escapeHtml(message).replace(/
+/g, '
+'));
     } catch (error) {
       logger.error('Error in admin command', { error });
-      ctx.reply('❌ حدث خطأ.');
+      await ctx.reply('❌ حدث خطأ.');
     }
   });
 
