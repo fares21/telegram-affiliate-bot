@@ -94,11 +94,13 @@ export class Broadcaster {
     options: BroadcastOptions
   ): Promise<{ success: boolean; error?: any }> {
     try {
-      await this.bot.telegram.sendMessage(chatId, options.message, {
-        parse_mode: options.parseMode || 'Markdown',
-        disable_web_page_preview: options.disableWebPagePreview || false,
-        reply_markup: options.replyMarkup
-      });
+    await this.bot.telegram.sendMessage(chatId, options.message, {
+  parse_mode: options.parseMode || 'Markdown',
+  link_preview_options: {  // ← غيّر من disable_web_page_preview
+    is_disabled: options.disableWebPagePreview || false
+  },
+  reply_markup: options.replyMarkup
+});
 
       return { success: true };
     } catch (error: any) {
