@@ -20,7 +20,18 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
-
+// بعد endpoint /health
+app.get('/keepalive', (req, res) => {
+  const now = new Date().toISOString();
+  logger.info('Keep-alive ping received', { timestamp: now });
+  
+  res.json({ 
+    status: 'alive', 
+    message: 'Bot is awake and running',
+    timestamp: now,
+    uptime: process.uptime()
+  });
+});
 // Webhook endpoint
 app.post(config.bot.webhookPath, (req, res) => {
   bot.handleUpdate(req.body, res);
