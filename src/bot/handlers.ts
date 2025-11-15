@@ -10,34 +10,45 @@ import { t } from '../config/i18n';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 
-// أدوات أمان للتنسيق
-function escapeHtml(s: string) {
+// دوال مساعدة للتنسيق الآمن
+function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
-function stripHtml(s: string) {
+
+function stripHtml(s: string): string {
   return s.replace(/<[^>]*>/g, '');
 }
-function truncate(s: string, max = 180) {
+
+function truncate(s: string, max: number = 180): string {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
-// غلاف إرسال آمن مع fallback
-async function safeReply(ctx: any, html: string, extra: any = {}) {
+// إرسال آمن مع fallback
+async function safeReply(ctx: any, html: string, extra: any = {}): Promise<any> {
   try {
     return await ctx.reply(html, { parse_mode: 'HTML', ...extra });
   } catch (e) {
-    logger.error('Reply HTML failed, sending plain text', { e });
+    logger.error('safeReply HTML failed, sending plain text', { e });
     return await ctx.reply(stripHtml(html), extra);
   }
 }
-async function safeSendMessage(bot: Telegraf, chatId: number, html: string, extra: any = {}) {
+
+async function safeSendMessage(
+  bot: Telegraf,
+  chatId: number,
+  html: string,
+  extra: any = {}
+): Promise<any> {
   try {
-    return await bot.telegram.sendMessage(chatId, html, { parse_mode: 'HTML', ...extra });
+    return await bot.telegram.sendMessage(chatId, html, {
+      parse_mode: 'HTML',
+      ...extra
+    });
   } catch (e) {
-    logger.error('sendMessage HTML failed, sending plain text', { e });
+    logger.error('safeSendMessage HTML failed, sending plain text', { e });
     return await bot.telegram.sendMessage(chatId, stripHtml(html), extra);
   }
 }
@@ -49,17 +60,26 @@ export function registerHandlers(bot: Telegraf<BotContext>): void {
       const chatId = ctx.chat.id;
       const username = ctx.from.username;
       await createOrUpdateUser(chatId, username);
+
       const language = ctx.session?.language || 'ar';
       const welcome = escapeHtml(t('welcome', language));
+
       await safeReply(ctx, welcome, {
         reply_markup: {
           keyboard: [
-            [{ text: t('addToCart', language) }, { text: t('viewCart', language) }],
-            [{ text: t('setAlert', language) }, { text: t('help', language) }]
+            [
+              { text: t('addToCart', language) },
+              { text: t('viewCart', language) }
+            ],
+            [
+              { text: t('setAlert', language) },
+              { text: t('help', language) }
+            ]
           ],
           resize_keyboard: true
         }
       });
+
       logger.info('User started bot', { chatId, username });
     } catch (error) {
       logger.error('Error in start command', { error });
@@ -69,7 +89,8 @@ export function registerHandlers(bot: Telegraf<BotContext>): void {
 
   // /language
   bot.command('language', async (ctx) => {
-    await safeReply(ctx, escapeHtml('اختر اللغة / Choose Language:'), {
+    const txt = 'اختر اللغة / Choose Language:';
+    await safeReply(ctx, escapeHtml(txt), {
       reply_markup: {
         inline_keyboard: [
           [
@@ -87,9 +108,11 @@ export function registerHandlers(bot: Telegraf<BotContext>): void {
       const language = ctx.match[1];
       ctx.session = ctx.session || {};
       ctx.session.language = language;
+
       await updateUserLanguage(ctx.chat!.id, language);
       await ctx.answerCbQuery();
       await safeReply(ctx, escapeHtml(t('welcome', language)));
+
       logger.info('Language changed', { chatId: ctx.chat!.id, language });
     } catch (error) {
       logger.error('Error changing language', { error });
@@ -97,61 +120,99 @@ export function registerHandlers(bot: Telegraf<BotContext>): void {
     }
   });
 
-  // /help (HTML بدل Markdown)
+  // /help
   bot.command('help', async (ctx) => {
     const lang = ctx.session?.language || 'ar';
-    const helpHtml = lang === 'ar' ? `
-📚 <b>دليل الاستخدام</b>
 
-🔗 <b>إضافة منتج:</b>
-أرسل رابط منتج من AliExpress للحصول على:
-• رابط أفلييت مخصص
-• السعر الأصلي والحالي
-• الكوبونات المتاحة
-• السعر النهائي بعد الخصومات
+    const helpHtmlAr = '📚 <b>دليل الاستخدام</b>
 
-🛒 <b>السلة:</b>
-/cart - عرض سلة التسوق
-/add_to_cart [رابط] - إضافة منتج للسلة
-سيتم مراقبة الأسعار تلقائياً وإرسال تنبيهات عند التغيير
+' +
+      '🔗 <b>إضافة منتج:</b>
+' +
+      'أرسل رابط منتج من AliExpress للحصول على:
+' +
+      '• رابط أفلييت مخصص
+' +
+      '• السعر الأصلي والحالي
+' +
+      '• الكوبونات المتاحة
+' +
+      '• السعر النهائي بعد الخصومات
 
-🔔 <b>التنبيهات:</b>
-/alert [كلمة] - تفعيل تنبيه للكلمة المفتاحية
-/my_alerts - عرض تنبيهاتك النشطة
+' +
+      '🛒 <b>السلة:</b>
+' +
+      '/cart - عرض سلة التسوق
+' +
+      '/add_to_cart [رابط] - إضافة منتج للسلة
+' +
+      'سيتم مراقبة الأسعار تلقائياً وإرسال تنبيهات عند التغيير
 
-⚙️ <b>الإعدادات:</b>
-/language - تغيير اللغة
-/stats - إحصائياتك
+' +
+      '🔔 <b>التنبيهات:</b>
+' +
+      '/alert [كلمة] - تفعيل تنبيه للكلمة المفتاحية
+' +
+      '/my_alerts - عرض تنبيهاتك النشطة
 
-<b>للمشرفين فقط:</b>
-/broadcast [رسالة] - إرسال بث
-/admin - لوحة الإدارة
-` : `
-📚 <b>User Guide</b>
+' +
+      '⚙️ <b>الإعدادات:</b>
+' +
+      '/language - تغيير اللغة
+' +
+      '/stats - إحصائياتك
 
-🔗 <b>Add Product:</b>
-Send an AliExpress product link to get:
-• Custom affiliate link
-• Original/current price
-• Available coupons
-• Final price after discounts
+' +
+      '<b>للمشرفين فقط:</b>
+' +
+      '/broadcast [رسالة]
+' +
+      '/admin';
 
-🛒 <b>Cart:</b>
-/cart - View cart
-/add_to_cart [link] - Add product
+    const helpHtmlEn = '📚 <b>User Guide</b>
 
-🔔 <b>Alerts:</b>
-/alert [keyword] - Set alert
-/my_alerts - View alerts
+' +
+      '🔗 <b>Add Product:</b>
+' +
+      'Send an AliExpress product link to get:
+' +
+      '• Custom affiliate link
+' +
+      '• Original/current price
+' +
+      '• Available coupons
+' +
+      '• Final price after discounts
 
-⚙️ <b>Settings:</b>
-/language - Change language
-/stats - Your stats
+' +
+      '🛒 <b>Cart:</b>
+' +
+      '/cart - View cart
+' +
+      '/add_to_cart [link] - Add product
 
-<b>Admin only:</b>
-/broadcast [message]
-/admin
-`;
+' +
+      '🔔 <b>Alerts:</b>
+' +
+      '/alert [keyword] - Set alert
+' +
+      '/my_alerts - View alerts
+
+' +
+      '⚙️ <b>Settings:</b>
+' +
+      '/language - Change language
+' +
+      '/stats - Your stats
+
+' +
+      '<b>Admin only:</b>
+' +
+      '/broadcast [message]
+' +
+      '/admin';
+
+    const helpHtml = lang === 'ar' ? helpHtmlAr : helpHtmlEn;
     await safeReply(ctx, helpHtml);
   });
 
@@ -173,26 +234,38 @@ Send an AliExpress product link to get:
       const rawTitle = product?.product_title || 'منتج';
       const title = escapeHtml(truncate(rawTitle));
       const affUrl = escapeHtml(affiliateData.affiliateUrl);
+      const pricingHtml = pricingService.formatPricingInfo(pricing, lang); // يجب أن تكون HTML
 
-      // تأكد أن formatPricingInfo تُنتج HTML
-      const pricingHtml = pricingService.formatPricingInfo(pricing, lang);
+      const header = '📦 <b>' + title + '</b>
 
-      const messageHtml = `📦 <b>${title}</b>
+';
+      const footer = '
 
-${pricingHtml}
+' +
+        '🔗 <b>' + escapeHtml(t('affiliateLink', lang)) + ':</b>
+' +
+        affUrl;
 
-🔗 <b>${escapeHtml(t('affiliateLink', lang))}:</b>
-${affUrl}`;
+      const messageHtml = header + pricingHtml + footer;
 
       const buttons = Markup.inlineKeyboard([
         [
-          Markup.button.url(lang === 'ar' ? '🛍 زيارة المنتج' : '🛍 Visit Product', affiliateData.affiliateUrl)
+          Markup.button.url(
+            lang === 'ar' ? '🛍 زيارة المنتج' : '🛍 Visit Product',
+            affiliateData.affiliateUrl
+          )
         ],
         [
-          Markup.button.callback(lang === 'ar' ? '🛒 إضافة للسلة' : '🛒 Add to Cart', `add_cart_${product?.product_id || ''}`)
+          Markup.button.callback(
+            lang === 'ar' ? '🛒 إضافة للسلة' : '🛒 Add to Cart',
+            'add_cart_' + (product?.product_id || '')
+          )
         ],
         [
-          Markup.button.callback(lang === 'ar' ? '📤 مشاركة' : '📤 Share', `share_${product?.product_id || ''}`)
+          Markup.button.callback(
+            lang === 'ar' ? '📤 مشاركة' : '📤 Share',
+            'share_' + (product?.product_id || '')
+          )
         ]
       ]);
 
@@ -202,7 +275,6 @@ ${affUrl}`;
         ...buttons
       });
 
-      // تنبيهات مطابقة
       if (product) {
         const matches = await alertsService.findAlertMatches(
           product.product_title,
@@ -210,12 +282,14 @@ ${affUrl}`;
           pricing.finalPrice,
           pricing.savingsPercentage
         );
+
         for (const match of matches) {
           if (match.chatId !== chatId) {
-            const alertHtml = alertsService.formatAlertMessage(match, lang); // اجعلها تُنتج HTML
-            await safeSendMessage(bot, match.chatId, `${alertHtml}
+            const alertHtml = alertsService.formatAlertMessage(match, lang); // HTML
+            const fullAlert = alertHtml + '
 
-${affUrl}`, {
+' + affUrl;
+            await safeSendMessage(bot, match.chatId, fullAlert, {
               link_preview_options: { is_disabled: false }
             });
           }
@@ -237,18 +311,21 @@ ${affUrl}`, {
       const lang = ctx.session?.language || 'ar';
 
       const cartItems = await cartService.getUserCart(user.id);
-      // عدّل cartService لتُرجع HTML
-      const msgHtml = cartService.formatCartMessage(cartItems, lang);
+      const msgHtml = cartService.formatCartMessage(cartItems, lang); // HTML
 
       if (cartItems.length > 0) {
         const buttons = Markup.inlineKeyboard(
-          cartItems.slice(0, 10).map((item, index) => [
-            Markup.button.callback(
-              `${index + 1}. ${truncate(item.title, 30)}`,
-              `view_cart_${item.id}`
-            )
-          ])
+          cartItems.slice(0, 10).map((item: any, index: number) => {
+            const label = (index + 1).toString() + '. ' + truncate(item.title, 30);
+            return [
+              Markup.button.callback(
+                label,
+                'view_cart_' + item.id
+              )
+            ];
+          })
         );
+
         await safeReply(ctx, msgHtml, { ...buttons });
       } else {
         await safeReply(ctx, msgHtml);
@@ -266,7 +343,11 @@ ${affUrl}`, {
       const chatId = ctx.chat!.id;
       await createOrUpdateUser(chatId, ctx.from!.username);
       const lang = ctx.session?.language || 'ar';
-      await ctx.answerCbQuery(lang === 'ar' ? '✅ تمت الإضافة للسلة' : '✅ Added to cart');
+
+      await ctx.answerCbQuery(
+        lang === 'ar' ? '✅ تمت الإضافة للسلة' : '✅ Added to cart'
+      );
+
       logger.info('Product added to cart', { chatId, productId });
     } catch (error) {
       logger.error('Error adding to cart', { error });
@@ -281,13 +362,13 @@ ${affUrl}`, {
       const lang = ctx.session?.language || 'ar';
 
       if (args.length === 0) {
-        await safeReply(ctx, lang === 'ar'
-          ? '💡 الاستخدام: /alert [كلمة مفتاحية]
+        const txtAr = '💡 الاستخدام: /alert [كلمة مفتاحية]
 
-مثال: /alert Xiaomi'
-          : '💡 Usage: /alert [keyword]
+مثال: /alert Xiaomi';
+        const txtEn = '💡 Usage: /alert [keyword]
 
-Example: /alert Xiaomi');
+Example: /alert Xiaomi';
+        await safeReply(ctx, lang === 'ar' ? txtAr : txtEn);
         return;
       }
 
@@ -296,7 +377,10 @@ Example: /alert Xiaomi');
       const user = await createOrUpdateUser(chatId, ctx.from.username);
 
       await alertsService.createUserAlert(user.id, keyword);
-      await safeReply(ctx, escapeHtml(t('alertSet', lang, { keyword })));
+
+      const msg = t('alertSet', lang, { keyword });
+      await safeReply(ctx, escapeHtml(msg));
+
       logger.info('Alert created', { chatId, keyword });
     } catch (error) {
       logger.error('Error creating alert', { error });
@@ -318,20 +402,24 @@ Example: /alert Xiaomi');
         return;
       }
 
-      const header = lang === 'ar'
-        ? `🔔 <b>تنبيهاتك النشطة</b> (${alerts.length})
+      const headerAr = '🔔 <b>تنبيهاتك النشطة</b> (' + alerts.length.toString() + ')
 
-`
-        : `🔔 <b>Your Active Alerts</b> (${alerts.length})
+';
+      const headerEn = '🔔 <b>Your Active Alerts</b> (' + alerts.length.toString() + ')
 
-`;
+';
 
-      const buttons = alerts.map((alert, index) => [
-        Markup.button.callback(
-          `${index + 1}. ${truncate(alert.keyword, 40)} ❌`,
-          `del_alert_${alert.id}`
-        )
-      ]);
+      const header = lang === 'ar' ? headerAr : headerEn;
+
+      const buttons = alerts.map((alert: any, index: number) => {
+        const label = (index + 1).toString() + '. ' + truncate(alert.keyword, 40) + ' ❌';
+        return [
+          Markup.button.callback(
+            label,
+            'del_alert_' + alert.id.toString()
+          )
+        ];
+      });
 
       await safeReply(ctx, header, { ...Markup.inlineKeyboard(buttons) });
     } catch (error) {
@@ -343,11 +431,19 @@ Example: /alert Xiaomi');
   // حذف تنبيه
   bot.action(/del_alert_(.+)/, async (ctx) => {
     try {
-      const alertId = parseInt(ctx.match[1]);
+      const alertId = parseInt(ctx.match[1], 10);
       const lang = ctx.session?.language || 'ar';
+
       await alertsService.deactivateAlert(alertId);
-      await ctx.answerCbQuery(lang === 'ar' ? '✅ تم إلغاء التنبيه' : '✅ Alert cancelled');
-      await ctx.deleteMessage();
+      await ctx.answerCbQuery(
+        lang === 'ar' ? '✅ تم إلغاء التنبيه' : '✅ Alert cancelled'
+      );
+      try {
+        await ctx.deleteMessage();
+      } catch (e) {
+        logger.warn('Failed to delete alert message', { e });
+      }
+
       logger.info('Alert deactivated', { alertId });
     } catch (error) {
       logger.error('Error deleting alert', { error });
@@ -365,21 +461,31 @@ Example: /alert Xiaomi');
       const cartItems = await cartService.getUserCart(user.id);
       const alerts = await alertsService.getUserAlerts(user.id);
 
-      const message = lang === 'ar' ? `
-📊 <b>إحصائياتك</b>
+      const ar =
+        '📊 <b>إحصائياتك</b>
 
-🛒 منتجات في السلة: ${cartItems.length}
-🔔 تنبيهات نشطة: ${alerts.length}
-👤 معرف المستخدم: ${user.id}
-📅 تاريخ الانضمام: ${new Date(user.created_at).toLocaleDateString('ar')}
-` : `
-📊 <b>Your Statistics</b>
+' +
+        '🛒 منتجات في السلة: ' + cartItems.length.toString() + '
+' +
+        '🔔 تنبيهات نشطة: ' + alerts.length.toString() + '
+' +
+        '👤 معرف المستخدم: ' + user.id.toString() + '
+' +
+        '📅 تاريخ الانضمام: ' + new Date(user.created_at).toLocaleDateString('ar');
 
-🛒 Cart items: ${cartItems.length}
-🔔 Active alerts: ${alerts.length}
-👤 User ID: ${user.id}
-📅 Join date: ${new Date(user.created_at).toLocaleDateString('en')}
-`;
+      const en =
+        '📊 <b>Your Statistics</b>
+
+' +
+        '🛒 Cart items: ' + cartItems.length.toString() + '
+' +
+        '🔔 Active alerts: ' + alerts.length.toString() + '
+' +
+        '👤 User ID: ' + user.id.toString() + '
+' +
+        '📅 Join date: ' + new Date(user.created_at).toLocaleDateString('en');
+
+      const message = lang === 'ar' ? ar : en;
 
       await safeReply(ctx, escapeHtml(message).replace(/
 /g, '
@@ -390,85 +496,125 @@ Example: /alert Xiaomi');
     }
   });
 
-  // /broadcast (Admins)
+  // /broadcast
   bot.command('broadcast', async (ctx) => {
     try {
       const userId = ctx.from.id;
       const lang = ctx.session?.language || 'ar';
+
       if (!config.bot.adminIds.includes(userId)) {
         await ctx.reply(t('notAdmin', lang));
         return;
       }
-      const message = ctx.message.text.split(' ').slice(1).join(' ');
-      if (!message) {
-        await safeReply(ctx, lang === 'ar'
-          ? '💡 الاستخدام: /broadcast [الرسالة]
 
-مثال: /broadcast عروض جديدة اليوم!'
-          : '💡 Usage: /broadcast [message]
+      const parts = ctx.message.text.split(' ').slice(1);
+      const msg = parts.join(' ');
 
-Example: /broadcast New deals today!');
+      if (!msg) {
+        const ar = '💡 الاستخدام: /broadcast [الرسالة]
+
+مثال: /broadcast عروض جديدة اليوم!';
+        const en = '💡 Usage: /broadcast [message]
+
+Example: /broadcast New deals today!';
+        await safeReply(ctx, lang === 'ar' ? ar : en);
         return;
       }
-      await safeReply(ctx,
-        lang === 'ar'
-          ? `⚠️ هل أنت متأكد من إرسال هذا البث لجميع المستخدمين؟
 
-"${escapeHtml(truncate(message, 500))}"`
-          : `⚠️ Are you sure you want to broadcast this message to all users?
+      const preview = truncate(msg, 500);
+      const questionAr =
+        '⚠️ هل أنت متأكد من إرسال هذا البث لجميع المستخدمين؟
 
-"${escapeHtml(truncate(message, 500))}"`,
-        Markup.inlineKeyboard([
-          [
-            Markup.button.callback(lang === 'ar' ? '✅ نعم' : '✅ Yes', `confirm_broadcast`),
-            Markup.button.callback(lang === 'ar' ? '❌ لا' : '❌ No', `cancel_broadcast`)
-          ]
-        ])
-      );
+"' +
+        escapeHtml(preview) +
+        '"';
+      const questionEn =
+        '⚠️ Are you sure you want to broadcast this message to all users?
+
+"' +
+        escapeHtml(preview) +
+        '"';
+
+      const question = lang === 'ar' ? questionAr : questionEn;
+
+      await safeReply(ctx, question, Markup.inlineKeyboard([
+        [
+          Markup.button.callback(lang === 'ar' ? '✅ نعم' : '✅ Yes', 'confirm_broadcast'),
+          Markup.button.callback(lang === 'ar' ? '❌ لا' : '❌ No', 'cancel_broadcast')
+        ]
+      ]));
+
       ctx.session = ctx.session || {};
-      ctx.session.tempData = { broadcastMessage: message };
+      ctx.session.tempData = { broadcastMessage: msg };
     } catch (error) {
       logger.error('Error in broadcast command', { error });
       await ctx.reply('❌ حدث خطأ.');
     }
   });
 
+  // تأكيد البث
   bot.action('confirm_broadcast', async (ctx) => {
     try {
       const userId = ctx.from.id;
       const lang = ctx.session?.language || 'ar';
+
       if (!config.bot.adminIds.includes(userId)) {
         await ctx.answerCbQuery(t('notAdmin', lang));
         return;
       }
-      const message = ctx.session?.tempData?.broadcastMessage;
-      if (!message) {
+
+      const temp = ctx.session?.tempData;
+      const msg: string | undefined = temp?.broadcastMessage;
+
+      if (!msg) {
         await ctx.answerCbQuery('❌ Error: No message found');
         return;
       }
+
       await ctx.answerCbQuery(lang === 'ar' ? '📤 جاري الإرسال...' : '📤 Sending...');
       await ctx.editMessageText(lang === 'ar' ? '⏳ جاري إرسال البث...' : '⏳ Broadcasting...');
+
       const broadcaster = new Broadcaster(bot);
-      const result = await broadcaster.sendBroadcast({ message, parseMode: 'HTML' });
-      const resultMsg =
-        lang === 'ar'
-          ? `📊 <b>نتيجة البث</b>
+      const result = await broadcaster.sendBroadcast({
+        message: msg,
+        parseMode: 'HTML'
+      });
 
-✅ نجح: ${result.successCount}
-❌ فشل: ${result.failureCount}
-📮 الإجمالي: ${result.totalRecipients}
-⏱ المدة: ${(result.duration / 1000).toFixed(1)}ث`
-          : `📊 <b>Broadcast Results</b>
+      const dur = (result.duration / 1000).toFixed(1);
 
-✅ Success: ${result.successCount}
-❌ Failed: ${result.failureCount}
-📮 Total: ${result.totalRecipients}
-⏱ Duration: ${(result.duration / 1000).toFixed(1)}s`;
+      const textAr =
+        '📊 <b>نتيجة البث</b>
+
+' +
+        '✅ نجح: ' + result.successCount.toString() + '
+' +
+        '❌ فشل: ' + result.failureCount.toString() + '
+' +
+        '📮 الإجمالي: ' + result.totalRecipients.toString() + '
+' +
+        '⏱ المدة: ' + dur + 'ث';
+
+      const textEn =
+        '📊 <b>Broadcast Results</b>
+
+' +
+        '✅ Success: ' + result.successCount.toString() + '
+' +
+        '❌ Failed: ' + result.failureCount.toString() + '
+' +
+        '📮 Total: ' + result.totalRecipients.toString() + '
+' +
+        '⏱ Duration: ' + dur + 's';
+
+      const finalTxt = lang === 'ar' ? textAr : textEn;
+
       try {
-        await ctx.editMessageText(resultMsg, { parse_mode: 'HTML' });
-      } catch {
-        await ctx.editMessageText(stripHtml(resultMsg));
+        await ctx.editMessageText(finalTxt, { parse_mode: 'HTML' });
+      } catch (e) {
+        logger.warn('editMessageText HTML failed', { e });
+        await ctx.editMessageText(stripHtml(finalTxt));
       }
+
       logger.info('Broadcast completed by admin', { userId, result });
     } catch (error) {
       logger.error('Error confirming broadcast', { error });
@@ -476,10 +622,15 @@ Example: /broadcast New deals today!');
     }
   });
 
+  // إلغاء البث
   bot.action('cancel_broadcast', async (ctx) => {
     const lang = ctx.session?.language || 'ar';
     await ctx.answerCbQuery(lang === 'ar' ? '❌ تم الإلغاء' : '❌ Cancelled');
-    try { await ctx.deleteMessage(); } catch {}
+    try {
+      await ctx.deleteMessage();
+    } catch (e) {
+      logger.warn('Failed to delete broadcast message', { e });
+    }
   });
 
   // /admin
@@ -487,40 +638,60 @@ Example: /broadcast New deals today!');
     try {
       const userId = ctx.from.id;
       const lang = ctx.session?.language || 'ar';
+
       if (!config.bot.adminIds.includes(userId)) {
         await ctx.reply(t('notAdmin', lang));
         return;
       }
+
       const { db } = await import('../database/connection');
+
       const usersCount = await db.query('SELECT COUNT(*) FROM users');
       const activeUsers = await db.query('SELECT COUNT(*) FROM users WHERE is_subscribed = true');
       const cartItems = await db.query('SELECT COUNT(*) FROM cart_items');
       const alerts = await db.query('SELECT COUNT(*) FROM alerts WHERE is_active = true');
 
-      const message = lang === 'ar' ? `
-⚙️ <b>لوحة الإدارة</b>
+      const ar =
+        '⚙️ <b>لوحة الإدارة</b>
 
-👥 إجمالي المستخدمين: ${usersCount.rows[0].count}
-✅ مستخدمون نشطون: ${activeUsers.rows[0].count}
-🛒 منتجات في السلال: ${cartItems.rows[0].count}
-🔔 تنبيهات نشطة: ${alerts.rows[0].count}
+' +
+        '👥 إجمالي المستخدمين: ' + usersCount.rows[0].count + '
+' +
+        '✅ مستخدمون نشطون: ' + activeUsers.rows[0].count + '
+' +
+        '🛒 منتجات في السلال: ' + cartItems.rows[0].count + '
+' +
+        '🔔 تنبيهات نشطة: ' + alerts.rows[0].count + '
 
-<b>الأوامر المتاحة:</b>
-/broadcast [رسالة]
-/stats
-` : `
-⚙️ <b>Admin Panel</b>
+' +
+        '<b>الأوامر المتاحة:</b>
+' +
+        '/broadcast [رسالة]
+' +
+        '/stats';
 
-👥 Total Users: ${usersCount.rows[0].count}
-✅ Active Users: ${activeUsers.rows[0].count}
-🛒 Cart Items: ${cartItems.rows[0].count}
-🔔 Active Alerts: ${alerts.rows[0].count}
+      const en =
+        '⚙️ <b>Admin Panel</b>
 
-<b>Commands:</b>
-/broadcast [message]
-/stats
-`;
-      await safeReply(ctx, escapeHtml(message).replace(/
+' +
+        '👥 Total Users: ' + usersCount.rows[0].count + '
+' +
+        '✅ Active Users: ' + activeUsers.rows[0].count + '
+' +
+        '🛒 Cart Items: ' + cartItems.rows[0].count + '
+' +
+        '🔔 Active Alerts: ' + alerts.rows[0].count + '
+
+' +
+        '<b>Commands:</b>
+' +
+        '/broadcast [message]
+' +
+        '/stats';
+
+      const txt = lang === 'ar' ? ar : en;
+
+      await safeReply(ctx, escapeHtml(txt).replace(/
 /g, '
 '));
     } catch (error) {
