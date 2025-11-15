@@ -1,14 +1,15 @@
-import { Telegraf, session } from 'telegraf';
+import { Telegraf, Context, session } from 'telegraf';
+import { Update } from 'telegraf/types';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 
-export interface BotContext {
+// تعريف صحيح لـ BotContext
+export interface BotContext extends Context {
   session?: {
     language?: string;
     awaitingInput?: string;
     tempData?: any;
   };
-  [key: string]: any;
 }
 
 export function createBot(): Telegraf<BotContext> {
@@ -44,7 +45,7 @@ export function createBot(): Telegraf<BotContext> {
     });
 
     ctx.reply('❌ حدث خطأ أثناء معالجة طلبك. يرجى المحاولة لاحقاً.')
-      .catch(err => logger.error('Error sending error message', err));
+      .catch((err: any) => logger.error('Error sending error message', err));
   });
 
   return bot;
