@@ -11,7 +11,8 @@ class Database {
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
     });
 
-    this.pool.on('error', (err) => {
+    // إضافة type للـ err
+    this.pool.on('error', (err: Error) => {  // ← أضف : Error
       logger.error('Unexpected database error', err);
     });
   }
